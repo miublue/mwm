@@ -5,4 +5,4 @@ sleep 0.1
 
 export DISPLAY=:80
 
-while sleep 1; do ./mwm; done
+./mwm

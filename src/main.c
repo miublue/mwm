@@ -10,259 +10,268 @@
 #include <unistd.h>
 #include "mlist.h"
 
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#include "mwm.h"
 
+// TODO: move stuffs to a config.h
 #define MOD Mod4Mask
-
-typedef struct client_t {
-    uint32_t x, y, w, h;
-    bool fullscreen;
-    Window window;
-} client_t;
-
-LIST_DEFINE(client_t, list_client_t);
-
-enum {
-    MODE_FLOAT,
-    MODE_TILE,
-    MODE_MONOCLE,
-
-    NUM_MODES,
-};
-
 #define TOPGAP 18
-int mode = MODE_TILE;
-list_client_t list;
-size_t cur = 0;
-bool focus_follows_pointer = false;
+#define DEFAULT_MODE MODE_TILE
+#define NUM_WS 10
 
-// TODO: multiple workspaces
+const bool focus_follows_pointer = false;
 
-static void win_focus(size_t c);
-static void win_center();
-static void win_tile();
-static void win_prev();
-static void win_next();
-static void win_kill();
-static void win_get_size();
-static void win_fullscreen();
-static void win_move(int wn, int x, int y);
-static void win_resize(int wn, int w, int h);
-static void win_swap(int a, int b);
-static void win_rotate_next();
-static void win_rotate_prev();
-static void win_add(Window w);
-static void win_del(Window w);
-static void exec(char **cmd);
-
-void grab_key(Window root, uint32_t mod, KeySym key);
-void key_press(XEvent *ev);
-
-const char *term_cmd[]  = { "mterm",    NULL };
+const char *term_cmd[]  = { "msterm",    NULL };
 const char *menu_cmd[]  = { "dmenu_run", NULL };
 
 Display *display;
 Window root;
-XButtonEvent start;
-XWindowAttributes attr;
+XButtonEvent mouse;
+XWindowAttributes hover_attr;
 uint32_t screen_w, screen_h;
 
-static void
-win_get_size()
+desktop_t desktops[NUM_WS];
+size_t cur_desktop = 0;
+
+#define CUR_WS desktops[cur_desktop]
+#define WS_WIN(c) CUR_WS.list.data[(c)]
+#define CUR_WIN WS_WIN(CUR_WS.cur)
+
+void
+ws_change(size_t c)
 {
-    client_t *c = &list.data[cur];
-    XWindowAttributes attr;
-    XGetWindowAttributes(display, c->window, &attr);
-    c->x = attr.x;
-    c->y = attr.y;
-    c->w = attr.width;
-    c->h = attr.height;
+    if (c >= NUM_WS || c == cur_desktop) return;
+
+    for (int i = 0; i < CUR_WS.list.size; ++i) {
+        XUnmapWindow(display, WS_WIN(i).window);
+    }
+
+    cur_desktop = c;
+
+    for (int i = 0; i < CUR_WS.list.size; ++i) {
+        XMapWindow(display, WS_WIN(i).window);
+    }
+
+    if (CUR_WS.list.size)
+        win_focus(CUR_WS.cur);
+    win_tile();
 }
 
-static void
+void
+win_to_ws(size_t c)
+{
+    if (c >= NUM_WS || c == cur_desktop) return;
+
+    client_t client = CUR_WIN;
+
+    LIST_ADD(desktops[c].list, 0, client);
+    desktops[c].cur = 0;
+
+    XUnmapWindow(display, CUR_WIN.window);
+    win_del(CUR_WIN.window);
+
+    if (CUR_WS.list.size) {
+        if (CUR_WS.cur >= CUR_WS.list.size)
+            CUR_WS.cur = CUR_WS.list.size-1;
+        win_focus(CUR_WS.cur);
+    }
+    win_tile();
+}
+
+void
+win_get_size()
+{
+    XWindowAttributes attr;
+    XGetWindowAttributes(display, CUR_WIN.window, &attr);
+    CUR_WIN.x = attr.x;
+    CUR_WIN.y = attr.y;
+    CUR_WIN.w = attr.width;
+    CUR_WIN.h = attr.height;
+}
+
+void
 win_tile()
 {
-    if (list.size == 0 || mode == MODE_FLOAT) return;
+    if (CUR_WS.list.size == 0 || CUR_WS.mode == MODE_FLOAT) return;
     Window wn;
 
-    if (mode == MODE_MONOCLE) {
-        for (int i = 0; i < list.size; ++i) {
-            wn = list.data[i].window;
-            list.data[i].fullscreen = false;
+    if (CUR_WS.mode == MODE_MONOCLE) {
+        for (int i = 0; i < CUR_WS.list.size; ++i) {
+            wn = WS_WIN(i).window;
+            WS_WIN(i).fullscreen = false;
             XMoveResizeWindow(display, wn, 0, TOPGAP, screen_w, screen_h-TOPGAP);
         }
         return;
     }
 
-    if (list.size == 1) {
-        wn = list.data[cur].window;
+    if (CUR_WS.list.size == 1) {
+        wn = CUR_WIN.window;
         XMoveResizeWindow(display, wn, 0, TOPGAP, screen_w, screen_h-TOPGAP);
         return;
     }
 
-    wn = list.data[0].window;
+    wn = WS_WIN(0).window;
     XMoveResizeWindow(display, wn, 0, TOPGAP, screen_w / 2, screen_h-TOPGAP);
 
-    int h = (screen_h-TOPGAP) / (list.size-1);
+    int h = (screen_h-TOPGAP) / (CUR_WS.list.size-1);
 
-    for (int i = 1; i < list.size; ++i) {
-        wn = list.data[i].window;
-        list.data[i].fullscreen = false;
+    for (int i = 1; i < CUR_WS.list.size; ++i) {
+        wn = WS_WIN(i).window;
+        WS_WIN(i).fullscreen = false;
         XMoveResizeWindow(display, wn, screen_w / 2, TOPGAP + (i-1)*h, screen_w / 2, h);
     }
 }
 
-static void
+void
 win_move(int wn, int x, int y)
 {
-    if (!list.size || wn < 0 || wn >= list.size) return;
-    if (mode != MODE_FLOAT || list.data[wn].fullscreen) return;
-    client_t *c = &list.data[wn];
-    c->x += x;
-    c->y += y;
-    XMoveWindow(display, c->window, c->x, c->y);
+    if (!CUR_WS.list.size || wn < 0 || wn >= CUR_WS.list.size) return;
+    if (CUR_WS.mode != MODE_FLOAT || WS_WIN(wn).fullscreen) return;
+    WS_WIN(wn).x += x;
+    WS_WIN(wn).y += y;
+    XMoveWindow(display, WS_WIN(wn).window, WS_WIN(wn).x, WS_WIN(wn).y);
 }
 
-static void
+void
 win_resize(int wn, int w, int h)
 {
-    if (!list.size || wn < 0 || wn >= list.size) return;
-    if (mode != MODE_FLOAT || list.data[wn].fullscreen) return;
-    client_t *c = &list.data[wn];
-    c->w += w;
-    c->h += h;
-    XResizeWindow(display, c->window, c->w, c->h);
+    if (!CUR_WS.list.size || wn < 0 || wn >= CUR_WS.list.size) return;
+    if (CUR_WS.mode != MODE_FLOAT || WS_WIN(wn).fullscreen) return;
+    WS_WIN(wn).w += w;
+    WS_WIN(wn).h += h;
+    XResizeWindow(display, WS_WIN(wn).window, WS_WIN(wn).w, WS_WIN(wn).h);
 }
 
-static void
+void
 win_prev()
 {
-    if (!list.size) return;
-    if (cur == 0) cur = list.size-1;
-    else cur--;
-    XRaiseWindow(display, list.data[cur].window);
-    win_focus(cur);
+    if (!CUR_WS.list.size) return;
+    if (CUR_WS.cur == 0) CUR_WS.cur = CUR_WS.list.size-1;
+    else CUR_WS.cur--;
+    XRaiseWindow(display, CUR_WIN.window);
+    win_focus(CUR_WS.cur);
 }
 
-static void
+void
 win_next()
 {
-    if (!list.size) return;
-    if (cur >= list.size-1) cur = 0;
-    else cur++;
-    XRaiseWindow(display, list.data[cur].window);
-    win_focus(cur);
+    if (!CUR_WS.list.size) return;
+    if (CUR_WS.cur >= CUR_WS.list.size-1) CUR_WS.cur = 0;
+    else CUR_WS.cur++;
+    XRaiseWindow(display, CUR_WIN.window);
+    win_focus(CUR_WS.cur);
 }
 
-static void
+void
 win_swap(int a, int b)
 {
-    if (list.size < 2 || a == b) return;
-    client_t c = list.data[a];
-    list.data[a] = list.data[b];
-    list.data[b] = c;
+    if (CUR_WS.list.size < 2 || a == b) return;
+    client_t c = WS_WIN(a);
+    WS_WIN(a) = WS_WIN(b);
+    WS_WIN(b) = c;
     win_focus(b);
     win_tile();
 }
 
-static void
+void
 win_rotate_next()
 {
-    if (list.size < 2) return;
-    if (cur == list.size-1) {
-        win_swap(cur, 0);
+    if (CUR_WS.list.size < 2) return;
+    if (CUR_WS.cur == CUR_WS.list.size-1) {
+        win_swap(CUR_WS.cur, 0);
         return;
     }
-    win_swap(cur, cur+1);
+    win_swap(CUR_WS.cur, CUR_WS.cur+1);
 }
 
-static void
+void
 win_rotate_prev()
 {
-    if (list.size < 2) return;
-    if (cur == 0) {
-        win_swap(cur, list.size-1);
+    if (CUR_WS.list.size < 2) return;
+    if (CUR_WS.cur == 0) {
+        win_swap(CUR_WS.cur, CUR_WS.list.size-1);
         return;
     }
-    win_swap(cur, cur-1);
+    win_swap(CUR_WS.cur, CUR_WS.cur-1);
 }
 
-static void
+void
 win_focus(size_t l)
 {
-    cur = l;
-    XSetInputFocus(display, list.data[cur].window, RevertToParent, CurrentTime);
-    if (mode == MODE_FLOAT && !list.data[cur].fullscreen)
+    CUR_WS.cur = l;
+    XSetInputFocus(display, CUR_WIN.window, RevertToParent, CurrentTime);
+    if (CUR_WS.mode == MODE_FLOAT && !CUR_WIN.fullscreen)
         win_get_size();
 }
 
-static void
+void
 win_center()
 {
-    if (!list.size || mode != MODE_FLOAT) return;
-    client_t *c = &list.data[cur];
-    c->fullscreen = false;
+    if (!CUR_WS.list.size || CUR_WS.mode != MODE_FLOAT) return;
+    CUR_WIN.fullscreen = false;
 
-    c->x = (screen_w / 2) - (c->w / 2);
-    c->y = (screen_h / 2) - (c->h / 2) + (TOPGAP / 2);
+    CUR_WIN.x = (screen_w / 2) - (CUR_WIN.w / 2);
+    CUR_WIN.y = (screen_h / 2) - (CUR_WIN.h / 2) + (TOPGAP / 2);
 
-    XMoveResizeWindow(display, c->window, c->x, c->y, c->w, c->h);
+    XMoveResizeWindow(display, CUR_WIN.window,
+            CUR_WIN.x, CUR_WIN.y, CUR_WIN.w, CUR_WIN.h);
 }
 
-static void
+void
 win_fullscreen()
 {
-    if (!list.size) return;
-    client_t *c = &list.data[cur];
+    if (!CUR_WS.list.size) return;
 
-    c->fullscreen = !c->fullscreen;
-    if (c->fullscreen) {
-        XRaiseWindow(display, c->window);
-        XMoveResizeWindow(display, c->window, 0, 0, screen_w, screen_h);
+    CUR_WIN.fullscreen = !CUR_WIN.fullscreen;
+    if (CUR_WIN.fullscreen) {
+        XRaiseWindow(display, CUR_WIN.window);
+        XMoveResizeWindow(display, CUR_WIN.window,
+                0, 0, screen_w, screen_h);
     }
     else {
-        XMoveResizeWindow(display, c->window, c->x, c->y, c->w, c->h);
+        XMoveResizeWindow(display, CUR_WIN.window,
+                CUR_WIN.x, CUR_WIN.y, CUR_WIN.w, CUR_WIN.h);
         win_tile();
     }
 }
 
-static void
+void
 win_kill()
 {
-    if (list.size) {
-        XKillClient(display, list.data[cur].window);
+    if (CUR_WS.list.size) {
+        XKillClient(display, CUR_WIN.window);
     }
 }
 
-static void
+void
 win_add(Window w)
 {
     client_t c;
     c.window = w;
     c.fullscreen = false;
 
-    LIST_ADD(list, 0, c);
-    cur = 0;
+    LIST_ADD(CUR_WS.list, 0, c);
+    CUR_WS.cur = 0;
 }
 
-static void
+void
 win_del(Window w)
 {
     int c = -1;
-    for (size_t i = 0; i < list.size; ++i) {
-        if (list.data[i].window == w) {
+    for (size_t i = 0; i < CUR_WS.list.size; ++i) {
+        if (WS_WIN(i).window == w) {
             c = i;
             break;
         }
     }
 
-    if (!list.size || c < 0) return;
-    LIST_POP(list, c);
+    if (!CUR_WS.list.size || c < 0) return;
+    LIST_POP(CUR_WS.list, c);
 
-    if (cur >= list.size) cur = list.size;
+    if (CUR_WS.cur >= CUR_WS.list.size)
+        CUR_WS.cur = CUR_WS.list.size-1;
 }
 
-static void
+void
 exec(char **cmd)
 {
     if (fork()) return;
@@ -279,6 +288,7 @@ grab_key(Window root, uint32_t mod, KeySym key)
         root, True, GrabModeAsync, GrabModeAsync);
 }
 
+// TODO: PLEASE PLEASE PLEASE PLEASE PLEASE PLEASE
 void
 key_press(XEvent *ev)
 {
@@ -298,7 +308,8 @@ key_press(XEvent *ev)
         win_fullscreen();
     }
     else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_w)) {
-        if (++mode == NUM_MODES) mode = 0;
+        if (++CUR_WS.mode == NUM_MODES)
+            CUR_WS.mode = 0;
         win_tile();
     }
     else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_o)) {
@@ -308,7 +319,7 @@ key_press(XEvent *ev)
         win_rotate_next();
     }
     else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_Tab)) {
-        if (list.size && list.data[cur].fullscreen) return;
+        if (CUR_WS.list.size && CUR_WIN.fullscreen) return;
         if (ev->xkey.state & ShiftMask) {
             win_prev();
         }
@@ -318,34 +329,82 @@ key_press(XEvent *ev)
     }
     else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_h)) {
         if (ev->xkey.state & ShiftMask) {
-            win_resize(cur, -20, 0);
+            win_resize(CUR_WS.cur, -20, 0);
         }
         else {
-            win_move(cur, -20, 0);
+            win_move(CUR_WS.cur, -20, 0);
         }
     }
     else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_l)) {
         if (ev->xkey.state & ShiftMask) {
-            win_resize(cur, 20, 0);
+            win_resize(CUR_WS.cur, 20, 0);
         }
         else {
-            win_move(cur, 20, 0);
+            win_move(CUR_WS.cur, 20, 0);
         }
     }
     else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_j)) {
         if (ev->xkey.state & ShiftMask) {
-            win_resize(cur, 0, 20);
+            win_resize(CUR_WS.cur, 0, 20);
         }
         else {
-            win_move(cur, 0, 20);
+            win_move(CUR_WS.cur, 0, 20);
         }
     }
     else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_k)) {
         if (ev->xkey.state & ShiftMask) {
-            win_resize(cur, 0, -20);
+            win_resize(CUR_WS.cur, 0, -20);
         }
         else {
-            win_move(cur, 0, -20);
+            win_move(CUR_WS.cur, 0, -20);
+        }
+    }
+    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_1)) {
+        if (ev->xkey.state & ShiftMask) {
+            win_to_ws(0);
+        }
+        else {
+            ws_change(0);
+        }
+    }
+    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_2)) {
+        if (ev->xkey.state & ShiftMask) {
+            win_to_ws(1);
+        }
+        else {
+            ws_change(1);
+        }
+    }
+    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_3)) {
+        if (ev->xkey.state & ShiftMask) {
+            win_to_ws(2);
+        }
+        else {
+            ws_change(2);
+        }
+    }
+    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_4)) {
+        if (ev->xkey.state & ShiftMask) {
+            win_to_ws(3);
+        }
+        else {
+            ws_change(3);
+        }
+    }
+    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_5)) {
+        if (ev->xkey.state & ShiftMask) {
+            win_to_ws(4);
+        }
+        else {
+            ws_change(4);
+        }
+    }
+    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_6)) {
+        if (ev->xkey.state & ShiftMask) {
+            win_to_ws(5);
+        }
+        else {
+            ws_change(5);
         }
     }
 }
@@ -367,8 +426,13 @@ main(int argc, char **argv)
     screen_h = XDisplayHeight(display, s);
 
     XSelectInput(display, root, SubstructureRedirectMask);
-    list = (list_client_t) LIST_ALLOC(client_t);
+    for (int i = 0; i < NUM_WS; ++i) {
+        desktops[i].list = (list_client_t) LIST_ALLOC(client_t);
+        desktops[i].mode = DEFAULT_MODE;
+        desktops[i].cur = 0;
+    }
 
+    // TODO: for the love of god fix this garbage
     grab_key(root, MOD, XK_Return);
     grab_key(root, MOD, XK_d);
     grab_key(root, MOD, XK_q);
@@ -391,6 +455,20 @@ main(int argc, char **argv)
     grab_key(root, MOD|ShiftMask, XK_j);
     grab_key(root, MOD|ShiftMask, XK_k);
 
+    grab_key(root, MOD, XK_1);
+    grab_key(root, MOD, XK_2);
+    grab_key(root, MOD, XK_3);
+    grab_key(root, MOD, XK_4);
+    grab_key(root, MOD, XK_5);
+    grab_key(root, MOD, XK_6);
+
+    grab_key(root, MOD|ShiftMask, XK_1);
+    grab_key(root, MOD|ShiftMask, XK_2);
+    grab_key(root, MOD|ShiftMask, XK_3);
+    grab_key(root, MOD|ShiftMask, XK_4);
+    grab_key(root, MOD|ShiftMask, XK_5);
+    grab_key(root, MOD|ShiftMask, XK_6);
+
     XGrabButton(display, 1, MOD, root, True,
         ButtonPressMask|ButtonReleaseMask|PointerMotionMask,
         GrabModeAsync, GrabModeAsync, None, None);
@@ -402,8 +480,8 @@ main(int argc, char **argv)
         XNextEvent(display, &ev);
 
         if (ev.type == EnterNotify && focus_follows_pointer) {
-            for (size_t i = 0; i < list.size; ++i) {
-                if (list.data[i].window == ev.xcrossing.window) {
+            for (size_t i = 0; i < CUR_WS.list.size; ++i) {
+                if (WS_WIN(i).window == ev.xcrossing.window) {
                     win_focus(i);
                     break;
                 }
@@ -421,22 +499,25 @@ main(int argc, char **argv)
         }
         if (ev.type == DestroyNotify) {
             win_del(ev.xdestroywindow.window);
-            if (list.size) {
+            if (CUR_WS.list.size) {
                 win_focus(0);
                 win_tile();
             }
         }
         if (ev.type == ConfigureRequest) {
             XConfigureRequestEvent *cr = &ev.xconfigurerequest;
-            XWindowChanges ch = {
-                .x = cr->x,
-                .y = cr->y,
-                .width = cr->width,
-                .height = cr->height,
-                .sibling = cr->above,
-                .stack_mode = cr->detail,
-            };
-            XConfigureWindow(display, cr->window, cr->value_mask, &ch);
+            if (cr->window != None) {
+                XWindowChanges ch = {
+                    .x = cr->x,
+                    .y = cr->y,
+                    .width = cr->width,
+                    .height = cr->height,
+                    .sibling = cr->above,
+                    .stack_mode = cr->detail,
+                };
+
+                XConfigureWindow(display, cr->window, cr->value_mask, &ch);
+            }
             // win_get_size();
         }
 
@@ -446,29 +527,31 @@ main(int argc, char **argv)
 
         if (ev.type == ButtonPress && ev.xbutton.subwindow != None) {
             XRaiseWindow(display, ev.xbutton.subwindow);
-            XGetWindowAttributes(display, ev.xbutton.subwindow, &attr);
-            start = ev.xbutton;
-            for (size_t i = 0; i < list.size; ++i) {
-                if (list.data[i].window == ev.xbutton.subwindow) {
+            XGetWindowAttributes(display, ev.xbutton.subwindow, &hover_attr);
+            mouse = ev.xbutton;
+            for (size_t i = 0; i < CUR_WS.list.size; ++i) {
+                if (WS_WIN(i).window == ev.xbutton.subwindow) {
                     win_focus(i);
                     break;
                 }
             }
         }
-        else if (ev.type == MotionNotify && start.subwindow != None) {
-            if (mode == MODE_FLOAT) {
-                int xdiff = ev.xbutton.x_root - start.x_root;
-                int ydiff = ev.xbutton.y_root - start.y_root;
+        else if (ev.type == MotionNotify && mouse.subwindow != None) {
+            if (CUR_WS.mode == MODE_FLOAT) {
+                int xdiff = ev.xbutton.x_root - mouse.x_root;
+                int ydiff = ev.xbutton.y_root - mouse.y_root;
                 
-                XMoveResizeWindow(display, start.subwindow,
-                    attr.x + (start.button==1 ? xdiff : 0),
-                    attr.y + (start.button==1 ? ydiff : 0),
-                    MAX(100, attr.width + (start.button==3 ? xdiff : 0)),
-                    MAX(50, attr.height + (start.button==3 ? ydiff : 0)));
+                XMoveResizeWindow(display, mouse.subwindow,
+                    hover_attr.x + (mouse.button==1 ? xdiff : 0),
+                    hover_attr.y + (mouse.button==1 ? ydiff : 0),
+                    MAX(100, hover_attr.width + (mouse.button==3 ? xdiff : 0)),
+                    MAX(50, hover_attr.height + (mouse.button==3 ? ydiff : 0)));
             }
         }
     }
 
-    LIST_FREE(list);
+    for (int i = 0; i < NUM_WS; ++i) {
+        LIST_FREE(desktops[i].list);
+    }
     return 0;
 }
