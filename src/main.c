@@ -15,6 +15,7 @@
 // TODO: move stuffs to a config.h
 #define MOD Mod4Mask
 #define TOPGAP 18
+#define GAPSIZE 6
 #define DEFAULT_MODE MODE_TILE
 #define NUM_WS 10
 
@@ -98,26 +99,43 @@ win_tile()
         for (int i = 0; i < CUR_WS.list.size; ++i) {
             wn = WS_WIN(i).window;
             WS_WIN(i).fullscreen = false;
-            XMoveResizeWindow(display, wn, 0, TOPGAP, screen_w, screen_h-TOPGAP);
+            XMoveResizeWindow(display, wn,
+                    GAPSIZE,
+                    TOPGAP + GAPSIZE,
+                    screen_w - GAPSIZE*2,
+                    screen_h - TOPGAP - GAPSIZE*2);
         }
         return;
     }
 
     if (CUR_WS.list.size == 1) {
         wn = CUR_WIN.window;
-        XMoveResizeWindow(display, wn, 0, TOPGAP, screen_w, screen_h-TOPGAP);
+        XMoveResizeWindow(display, wn,
+                GAPSIZE,
+                TOPGAP + GAPSIZE,
+                screen_w - GAPSIZE*2,
+                screen_h - TOPGAP - GAPSIZE*2);
         return;
     }
 
+    int master_sz = screen_w / 2;
     wn = WS_WIN(0).window;
-    XMoveResizeWindow(display, wn, 0, TOPGAP, screen_w / 2, screen_h-TOPGAP);
+    XMoveResizeWindow(display, wn,
+            GAPSIZE,
+            TOPGAP + GAPSIZE,
+            master_sz - GAPSIZE,
+            screen_h - TOPGAP - (GAPSIZE*2));
 
-    int h = (screen_h-TOPGAP) / (CUR_WS.list.size-1);
+    int h = (screen_h-TOPGAP-GAPSIZE) / (CUR_WS.list.size-1);
 
     for (int i = 1; i < CUR_WS.list.size; ++i) {
         wn = WS_WIN(i).window;
         WS_WIN(i).fullscreen = false;
-        XMoveResizeWindow(display, wn, screen_w / 2, TOPGAP + (i-1)*h, screen_w / 2, h);
+        XMoveResizeWindow(display, wn,
+                master_sz + GAPSIZE,
+                (i-1)*h + TOPGAP + GAPSIZE,
+                master_sz - (GAPSIZE*2),
+                h - GAPSIZE);
     }
 }
 
@@ -424,8 +442,8 @@ main(int argc, char **argv)
     root = RootWindow(display, s);
     screen_w = XDisplayWidth(display, s);
     screen_h = XDisplayHeight(display, s);
-
     XSelectInput(display, root, SubstructureRedirectMask);
+
     for (int i = 0; i < NUM_WS; ++i) {
         desktops[i].list = (list_client_t) LIST_ALLOC(client_t);
         desktops[i].mode = DEFAULT_MODE;
