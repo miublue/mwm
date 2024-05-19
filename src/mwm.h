@@ -6,6 +6,24 @@
 #include <X11/Xlib.h>
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
+#define LEN(x) (sizeof(x) / sizeof((x)[0]))
+
+// taken from SOWM, which took from DWM. Long live FOSS!
+#define mod_clean(mask) (mask & \
+        (ShiftMask|ControlMask|Mod1Mask|Mod2Mask|Mod3Mask|Mod4Mask|Mod5Mask))
+
+typedef struct arg_t {
+    const char** com;
+    const int i;
+    // const Window w;
+} arg_t;
+
+struct key_t {
+    uint32_t mod;
+    KeySym keysym;
+    void (*function)(const arg_t arg);
+    const arg_t arg;
+};
 
 typedef struct client_t {
     uint32_t x, y, w, h;
@@ -28,25 +46,28 @@ typedef struct desktop_t {
     int mode;
 } desktop_t;
 
-void ws_change(size_t c);
-void win_to_ws(size_t c);
-void win_focus(size_t c);
-void win_center();
-void win_tile();
-void win_prev();
-void win_next();
-void win_kill();
-void win_get_size();
-void win_fullscreen();
+void exec(const arg_t arg);
+void tile_mode(const arg_t arg);
+void ws_change(const arg_t arg);
+void win_to_ws(const arg_t arg);
+void win_center(const arg_t arg);
+void win_prev(const arg_t arg);
+void win_next(const arg_t arg);
+void win_kill(const arg_t arg);
+void win_fullscreen(const arg_t arg);
+void win_rotate_next(const arg_t arg);
+void win_rotate_prev(const arg_t arg);
+void win_swap(int a, int b);
 void win_move(int wn, int x, int y);
 void win_resize(int wn, int w, int h);
-void win_swap(int a, int b);
-void win_rotate_next();
-void win_rotate_prev();
+
+void win_focus(size_t c);
+void win_tile();
+void win_get_size();
 void win_add(Window w);
 void win_del(Window w);
-void exec(char **cmd);
 
+void grab_input(Window root);
 void grab_key(Window root, uint32_t mod, KeySym key);
 void key_press(XEvent *ev);
 

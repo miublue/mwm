@@ -12,17 +12,7 @@
 
 #include "mwm.h"
 
-// TODO: move stuffs to a config.h
-#define MOD Mod4Mask
-#define TOPGAP 18
-#define GAPSIZE 6
-#define DEFAULT_MODE MODE_TILE
-#define NUM_WS 10
-
-const bool focus_follows_pointer = false;
-
-const char *term_cmd[]  = { "msterm",    NULL };
-const char *menu_cmd[]  = { "dmenu_run", NULL };
+#include "config.h"
 
 Display *display;
 Window root;
@@ -38,15 +28,22 @@ size_t cur_desktop = 0;
 #define CUR_WIN WS_WIN(CUR_WS.cur)
 
 void
-ws_change(size_t c)
+tile_mode(const arg_t arg)
 {
-    if (c >= NUM_WS || c == cur_desktop) return;
+    CUR_WS.mode = arg.i;
+    win_tile();
+}
+
+void
+ws_change(const arg_t arg)
+{
+    if (arg.i >= NUM_WS || arg.i == cur_desktop) return;
 
     for (int i = 0; i < CUR_WS.list.size; ++i) {
         XUnmapWindow(display, WS_WIN(i).window);
     }
 
-    cur_desktop = c;
+    cur_desktop = arg.i;
 
     for (int i = 0; i < CUR_WS.list.size; ++i) {
         XMapWindow(display, WS_WIN(i).window);
@@ -58,14 +55,14 @@ ws_change(size_t c)
 }
 
 void
-win_to_ws(size_t c)
+win_to_ws(const arg_t arg)
 {
-    if (c >= NUM_WS || c == cur_desktop) return;
+    if (arg.i >= NUM_WS || arg.i == cur_desktop) return;
 
     client_t client = CUR_WIN;
 
-    LIST_ADD(desktops[c].list, 0, client);
-    desktops[c].cur = 0;
+    LIST_ADD(desktops[arg.i].list, 0, client);
+    desktops[arg.i].cur = 0;
 
     XUnmapWindow(display, CUR_WIN.window);
     win_del(CUR_WIN.window);
@@ -130,6 +127,7 @@ win_tile()
 
     for (int i = 1; i < CUR_WS.list.size; ++i) {
         wn = WS_WIN(i).window;
+
         WS_WIN(i).fullscreen = false;
         XMoveResizeWindow(display, wn,
                 master_sz + GAPSIZE,
@@ -160,8 +158,9 @@ win_resize(int wn, int w, int h)
 }
 
 void
-win_prev()
+win_prev(const arg_t arg)
 {
+    (void) arg;
     if (!CUR_WS.list.size) return;
     if (CUR_WS.cur == 0) CUR_WS.cur = CUR_WS.list.size-1;
     else CUR_WS.cur--;
@@ -170,8 +169,9 @@ win_prev()
 }
 
 void
-win_next()
+win_next(const arg_t arg)
 {
+    (void) arg;
     if (!CUR_WS.list.size) return;
     if (CUR_WS.cur >= CUR_WS.list.size-1) CUR_WS.cur = 0;
     else CUR_WS.cur++;
@@ -191,8 +191,9 @@ win_swap(int a, int b)
 }
 
 void
-win_rotate_next()
+win_rotate_next(const arg_t arg)
 {
+    (void) arg;
     if (CUR_WS.list.size < 2) return;
     if (CUR_WS.cur == CUR_WS.list.size-1) {
         win_swap(CUR_WS.cur, 0);
@@ -202,8 +203,9 @@ win_rotate_next()
 }
 
 void
-win_rotate_prev()
+win_rotate_prev(const arg_t arg)
 {
+    (void) arg;
     if (CUR_WS.list.size < 2) return;
     if (CUR_WS.cur == 0) {
         win_swap(CUR_WS.cur, CUR_WS.list.size-1);
@@ -222,8 +224,9 @@ win_focus(size_t l)
 }
 
 void
-win_center()
+win_center(const arg_t arg)
 {
+    (void) arg;
     if (!CUR_WS.list.size || CUR_WS.mode != MODE_FLOAT) return;
     CUR_WIN.fullscreen = false;
 
@@ -235,8 +238,9 @@ win_center()
 }
 
 void
-win_fullscreen()
+win_fullscreen(const arg_t arg)
 {
+    (void) arg;
     if (!CUR_WS.list.size) return;
 
     CUR_WIN.fullscreen = !CUR_WIN.fullscreen;
@@ -253,8 +257,9 @@ win_fullscreen()
 }
 
 void
-win_kill()
+win_kill(const arg_t arg)
 {
+    (void) arg;
     if (CUR_WS.list.size) {
         XKillClient(display, CUR_WIN.window);
     }
@@ -282,147 +287,56 @@ win_del(Window w)
         }
     }
 
-    if (!CUR_WS.list.size || c < 0) return;
-    LIST_POP(CUR_WS.list, c);
+    if (c >= 0)
+        LIST_POP(CUR_WS.list, c);
 
-    if (CUR_WS.cur >= CUR_WS.list.size)
+    if (!CUR_WS.list.size)
+        CUR_WS.cur = 0;
+    else if (CUR_WS.cur >= CUR_WS.list.size)
         CUR_WS.cur = CUR_WS.list.size-1;
 }
 
 void
-exec(char **cmd)
+exec(const arg_t arg)
 {
     if (fork()) return;
     if (display) close(ConnectionNumber(display));
 
     setsid();
-    execvp((char*)cmd[0], (char**)cmd);
+    execvp((char*)arg.com[0], (char**)arg.com);
 }
 
 void
-grab_key(Window root, uint32_t mod, KeySym key)
+grab_input(Window root)
 {
-    XGrabKey(display, XKeysymToKeycode(display, key), mod,
-        root, True, GrabModeAsync, GrabModeAsync);
+    XUngrabKey(display, AnyKey, AnyModifier, root);
+    KeyCode code;
+
+    for (int i = 0; i < LEN(keys); ++i) {
+        if (code = XKeysymToKeycode(display, keys[i].keysym)) {
+            XGrabKey(display, code, keys[i].mod, root,
+                    True, GrabModeAsync, GrabModeAsync);
+        }
+    }
+
+    XGrabButton(display, 1, MOD, root, True,
+        ButtonPressMask|ButtonReleaseMask|PointerMotionMask,
+        GrabModeAsync, GrabModeAsync, None, None);
+    XGrabButton(display, 3, MOD, root, True,
+        ButtonPressMask|ButtonReleaseMask|PointerMotionMask,
+        GrabModeAsync, GrabModeAsync, None, None);
 }
 
 // TODO: PLEASE PLEASE PLEASE PLEASE PLEASE PLEASE
 void
 key_press(XEvent *ev)
 {
-    if (ev->xkey.keycode == XKeysymToKeycode(display, XK_Return)) {
-        exec(term_cmd);
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_d)) {
-        exec(menu_cmd);
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_q)) {
-        win_kill();
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_c)) {
-        win_center();
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_f)) {
-        win_fullscreen();
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_w)) {
-        if (++CUR_WS.mode == NUM_MODES)
-            CUR_WS.mode = 0;
-        win_tile();
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_o)) {
-        win_rotate_prev();
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_p)) {
-        win_rotate_next();
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_Tab)) {
-        if (CUR_WS.list.size && CUR_WIN.fullscreen) return;
-        if (ev->xkey.state & ShiftMask) {
-            win_prev();
-        }
-        else {
-            win_next();
-        }
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_h)) {
-        if (ev->xkey.state & ShiftMask) {
-            win_resize(CUR_WS.cur, -20, 0);
-        }
-        else {
-            win_move(CUR_WS.cur, -20, 0);
-        }
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_l)) {
-        if (ev->xkey.state & ShiftMask) {
-            win_resize(CUR_WS.cur, 20, 0);
-        }
-        else {
-            win_move(CUR_WS.cur, 20, 0);
-        }
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_j)) {
-        if (ev->xkey.state & ShiftMask) {
-            win_resize(CUR_WS.cur, 0, 20);
-        }
-        else {
-            win_move(CUR_WS.cur, 0, 20);
-        }
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_k)) {
-        if (ev->xkey.state & ShiftMask) {
-            win_resize(CUR_WS.cur, 0, -20);
-        }
-        else {
-            win_move(CUR_WS.cur, 0, -20);
-        }
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_1)) {
-        if (ev->xkey.state & ShiftMask) {
-            win_to_ws(0);
-        }
-        else {
-            ws_change(0);
-        }
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_2)) {
-        if (ev->xkey.state & ShiftMask) {
-            win_to_ws(1);
-        }
-        else {
-            ws_change(1);
-        }
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_3)) {
-        if (ev->xkey.state & ShiftMask) {
-            win_to_ws(2);
-        }
-        else {
-            ws_change(2);
-        }
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_4)) {
-        if (ev->xkey.state & ShiftMask) {
-            win_to_ws(3);
-        }
-        else {
-            ws_change(3);
-        }
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_5)) {
-        if (ev->xkey.state & ShiftMask) {
-            win_to_ws(4);
-        }
-        else {
-            ws_change(4);
-        }
-    }
-    else if (ev->xkey.keycode == XKeysymToKeycode(display, XK_6)) {
-        if (ev->xkey.state & ShiftMask) {
-            win_to_ws(5);
-        }
-        else {
-            ws_change(5);
+    KeySym keysym = XkbKeycodeToKeysym(display, ev->xkey.keycode, 0, 0);
+
+    for (int i = 0; i < LEN(keys); ++i) {
+        if (keys[i].keysym == keysym &&
+                mod_clean(keys[i].mod) == mod_clean(ev->xkey.state)) {
+            keys[i].function(keys[i].arg);
         }
     }
 }
@@ -450,49 +364,7 @@ main(int argc, char **argv)
         desktops[i].cur = 0;
     }
 
-    // TODO: for the love of god fix this garbage
-    grab_key(root, MOD, XK_Return);
-    grab_key(root, MOD, XK_d);
-    grab_key(root, MOD, XK_q);
-    grab_key(root, MOD, XK_c);
-    grab_key(root, MOD, XK_f);
-    grab_key(root, MOD, XK_w);
-    grab_key(root, MOD, XK_o);
-    grab_key(root, MOD, XK_p);
-
-    grab_key(root, MOD, XK_Tab);
-    grab_key(root, MOD|ShiftMask, XK_Tab);
-
-    grab_key(root, MOD, XK_h);
-    grab_key(root, MOD, XK_l);
-    grab_key(root, MOD, XK_j);
-    grab_key(root, MOD, XK_k);
-
-    grab_key(root, MOD|ShiftMask, XK_h);
-    grab_key(root, MOD|ShiftMask, XK_l);
-    grab_key(root, MOD|ShiftMask, XK_j);
-    grab_key(root, MOD|ShiftMask, XK_k);
-
-    grab_key(root, MOD, XK_1);
-    grab_key(root, MOD, XK_2);
-    grab_key(root, MOD, XK_3);
-    grab_key(root, MOD, XK_4);
-    grab_key(root, MOD, XK_5);
-    grab_key(root, MOD, XK_6);
-
-    grab_key(root, MOD|ShiftMask, XK_1);
-    grab_key(root, MOD|ShiftMask, XK_2);
-    grab_key(root, MOD|ShiftMask, XK_3);
-    grab_key(root, MOD|ShiftMask, XK_4);
-    grab_key(root, MOD|ShiftMask, XK_5);
-    grab_key(root, MOD|ShiftMask, XK_6);
-
-    XGrabButton(display, 1, MOD, root, True,
-        ButtonPressMask|ButtonReleaseMask|PointerMotionMask,
-        GrabModeAsync, GrabModeAsync, None, None);
-    XGrabButton(display, 3, MOD, root, True,
-        ButtonPressMask|ButtonReleaseMask|PointerMotionMask,
-        GrabModeAsync, GrabModeAsync, None, None);
+    grab_input(root);
 
     for (;;) {
         XNextEvent(display, &ev);
@@ -511,12 +383,13 @@ main(int argc, char **argv)
             win_add(w);
             XMapWindow(display, w);
             win_get_size();
-            win_center();
+            win_center((arg_t){0});
             win_focus(0);
             win_tile();
         }
         if (ev.type == DestroyNotify) {
             win_del(ev.xdestroywindow.window);
+            CUR_WS.cur = 0;
             if (CUR_WS.list.size) {
                 win_focus(0);
                 win_tile();
@@ -524,18 +397,16 @@ main(int argc, char **argv)
         }
         if (ev.type == ConfigureRequest) {
             XConfigureRequestEvent *cr = &ev.xconfigurerequest;
-            if (cr->window != None) {
-                XWindowChanges ch = {
-                    .x = cr->x,
-                    .y = cr->y,
-                    .width = cr->width,
-                    .height = cr->height,
-                    .sibling = cr->above,
-                    .stack_mode = cr->detail,
-                };
+            XWindowChanges ch = {
+                .x = cr->x,
+                .y = cr->y,
+                .width = cr->width,
+                .height = cr->height,
+                .sibling = cr->above,
+                .stack_mode = cr->detail,
+            };
 
-                XConfigureWindow(display, cr->window, cr->value_mask, &ch);
-            }
+            XConfigureWindow(display, cr->window, cr->value_mask, &ch);
             // win_get_size();
         }
 
