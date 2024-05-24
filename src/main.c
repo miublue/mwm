@@ -4,14 +4,11 @@
 #include <X11/XKBlib.h>
 
 #include <inttypes.h>
-#include <stdlib.h>
 #include <stdbool.h>
 #include <signal.h>
 #include <unistd.h>
 #include "mlist.h"
-
 #include "mwm.h"
-
 #include "config.h"
 
 Display *display;
@@ -23,6 +20,17 @@ uint32_t screen_w, screen_h;
 desktop_t desktops[NUM_WS];
 size_t cur_desktop = 0;
 
+static void (*events[LASTEvent])(XEvent*) = {
+    [ButtonPress]      = button_press,
+    [ButtonRelease]    = button_release,
+    [ConfigureRequest] = configure_request,
+    [KeyPress]         = key_press,
+    [MapRequest]       = map_request,
+    [UnmapNotify]      = unmap_notify,
+    [DestroyNotify]    = destroy_notify,
+    [MotionNotify]     = motion_notify,
+};
+
 #define CUR_WS desktops[cur_desktop]
 #define WS_WIN(c) CUR_WS.list.data[(c)]
 #define CUR_WIN WS_WIN(CUR_WS.cur)
@@ -31,6 +39,12 @@ void
 tile_mode(const arg_t arg)
 {
     CUR_WS.mode = arg.i;
+    if (CUR_WS.mode == MODE_FLOAT) {
+        for (int i = 0; i < CUR_WS.list.size; ++i) {
+            XMoveResizeWindow(display, WS_WIN(i).window,
+                WS_WIN(i).x, WS_WIN(i).y, WS_WIN(i).w, WS_WIN(i).h);
+        }
+    }
     win_tile();
 }
 
@@ -217,24 +231,42 @@ win_rotate_prev(const arg_t arg)
 void
 win_focus(size_t l)
 {
+    if (l > CUR_WS.list.size) return;
+    if (WS_WIN(l).window == None) {
+        win_del(l);
+        return;
+    }
     CUR_WS.cur = l;
     XSetInputFocus(display, CUR_WIN.window, RevertToParent, CurrentTime);
-    if (CUR_WS.mode == MODE_FLOAT && !CUR_WIN.fullscreen)
-        win_get_size();
+    XRaiseWindow(display, CUR_WIN.window);
+    // if (CUR_WS.mode == MODE_FLOAT && !CUR_WIN.fullscreen)
+        // win_get_size();
 }
 
 void
 win_center(const arg_t arg)
 {
     (void) arg;
-    if (!CUR_WS.list.size || CUR_WS.mode != MODE_FLOAT) return;
-    CUR_WIN.fullscreen = false;
-
+    if (!CUR_WS.list.size) return;
     CUR_WIN.x = (screen_w / 2) - (CUR_WIN.w / 2);
     CUR_WIN.y = (screen_h / 2) - (CUR_WIN.h / 2) + (TOPGAP / 2);
 
+    if (CUR_WS.mode != MODE_FLOAT) return;
+    CUR_WIN.fullscreen = false;
+
     XMoveResizeWindow(display, CUR_WIN.window,
             CUR_WIN.x, CUR_WIN.y, CUR_WIN.w, CUR_WIN.h);
+}
+
+void
+win_master(const arg_t arg)
+{
+    (void) arg;
+    if (CUR_WS.list.size < 2 || CUR_WS.cur == 0)
+        return;
+
+    win_swap(0, CUR_WS.cur);
+    win_focus(0);
 }
 
 void
@@ -327,7 +359,96 @@ grab_input(Window root)
         GrabModeAsync, GrabModeAsync, None, None);
 }
 
-// TODO: PLEASE PLEASE PLEASE PLEASE PLEASE PLEASE
+void
+map_request(XEvent *ev)
+{
+    Window w = ev->xmaprequest.window;
+    XSelectInput(display, w, StructureNotifyMask|EnterWindowMask);
+    win_add(w);
+    XMapWindow(display, w);
+    win_get_size();
+    win_center((arg_t){0});
+    win_focus(0);
+    win_tile();
+}
+
+void
+unmap_notify(XEvent *ev)
+{
+    win_del(ev->xdestroywindow.window);
+    if (CUR_WS.list.size) {
+        win_focus(CUR_WS.cur);
+        win_tile();
+    }
+}
+
+void
+destroy_notify(XEvent *ev)
+{
+    win_del(ev->xdestroywindow.window);
+    if (CUR_WS.list.size) {
+        win_focus(CUR_WS.cur);
+        win_tile();
+    }
+}
+
+void
+configure_request(XEvent *ev)
+{
+    XConfigureRequestEvent *cr = &ev->xconfigurerequest;
+    XWindowChanges ch = {
+        .x = cr->x,
+        .y = cr->y,
+        .width = cr->width,
+        .height = cr->height,
+        .sibling = cr->above,
+        .stack_mode = cr->detail,
+    };
+
+    XConfigureWindow(display, cr->window, cr->value_mask, &ch);
+}
+
+void
+button_press(XEvent *ev)
+{
+    if (ev->xbutton.subwindow == None)
+        return;
+
+    XRaiseWindow(display, ev->xbutton.subwindow);
+    XGetWindowAttributes(display, ev->xbutton.subwindow, &hover_attr);
+    mouse = ev->xbutton;
+
+    for (size_t i = 0; i < CUR_WS.list.size; ++i) {
+        if (WS_WIN(i).window == ev->xbutton.subwindow) {
+            win_focus(i);
+            break;
+        }
+    }
+}
+
+void
+button_release(XEvent *ev)
+{
+    mouse.subwindow = None;
+}
+
+void
+motion_notify(XEvent *ev)
+{
+    if (mouse.subwindow == None || CUR_WS.mode != MODE_FLOAT)
+        return;
+
+    int xdiff = ev->xbutton.x_root - mouse.x_root;
+    int ydiff = ev->xbutton.y_root - mouse.y_root;
+    
+    XMoveResizeWindow(display, mouse.subwindow,
+        hover_attr.x + (mouse.button==1 ? xdiff : 0),
+        hover_attr.y + (mouse.button==1 ? ydiff : 0),
+        MAX(100, hover_attr.width + (mouse.button==3 ? xdiff : 0)),
+        MAX(50, hover_attr.height + (mouse.button==3 ? ydiff : 0)));
+    win_get_size();
+}
+
 void
 key_press(XEvent *ev)
 {
@@ -341,6 +462,8 @@ key_press(XEvent *ev)
     }
 }
 
+int xerror() { return 0; }
+
 int
 main(int argc, char **argv)
 {
@@ -351,6 +474,7 @@ main(int argc, char **argv)
     }
 
     signal(SIGCHLD, SIG_IGN);
+    XSetErrorHandler(xerror);
 
     int s = DefaultScreen(display);
     root = RootWindow(display, s);
@@ -364,79 +488,13 @@ main(int argc, char **argv)
         desktops[i].cur = 0;
     }
 
+    XDefineCursor(display, root, XCreateFontCursor(display, 68));
     grab_input(root);
 
     for (;;) {
         XNextEvent(display, &ev);
-
-        if (ev.type == EnterNotify && focus_follows_pointer) {
-            for (size_t i = 0; i < CUR_WS.list.size; ++i) {
-                if (WS_WIN(i).window == ev.xcrossing.window) {
-                    win_focus(i);
-                    break;
-                }
-            }
-        }
-        if (ev.type == MapRequest) {
-            Window w = ev.xmaprequest.window;
-            XSelectInput(display, w, StructureNotifyMask|EnterWindowMask);
-            win_add(w);
-            XMapWindow(display, w);
-            win_get_size();
-            win_center((arg_t){0});
-            win_focus(0);
-            win_tile();
-        }
-        if (ev.type == DestroyNotify) {
-            win_del(ev.xdestroywindow.window);
-            CUR_WS.cur = 0;
-            if (CUR_WS.list.size) {
-                win_focus(0);
-                win_tile();
-            }
-        }
-        if (ev.type == ConfigureRequest) {
-            XConfigureRequestEvent *cr = &ev.xconfigurerequest;
-            XWindowChanges ch = {
-                .x = cr->x,
-                .y = cr->y,
-                .width = cr->width,
-                .height = cr->height,
-                .sibling = cr->above,
-                .stack_mode = cr->detail,
-            };
-
-            XConfigureWindow(display, cr->window, cr->value_mask, &ch);
-            // win_get_size();
-        }
-
-        if (ev.type == KeyPress) {
-            key_press(&ev);
-        }
-
-        if (ev.type == ButtonPress && ev.xbutton.subwindow != None) {
-            XRaiseWindow(display, ev.xbutton.subwindow);
-            XGetWindowAttributes(display, ev.xbutton.subwindow, &hover_attr);
-            mouse = ev.xbutton;
-            for (size_t i = 0; i < CUR_WS.list.size; ++i) {
-                if (WS_WIN(i).window == ev.xbutton.subwindow) {
-                    win_focus(i);
-                    break;
-                }
-            }
-        }
-        else if (ev.type == MotionNotify && mouse.subwindow != None) {
-            if (CUR_WS.mode == MODE_FLOAT) {
-                int xdiff = ev.xbutton.x_root - mouse.x_root;
-                int ydiff = ev.xbutton.y_root - mouse.y_root;
-                
-                XMoveResizeWindow(display, mouse.subwindow,
-                    hover_attr.x + (mouse.button==1 ? xdiff : 0),
-                    hover_attr.y + (mouse.button==1 ? ydiff : 0),
-                    MAX(100, hover_attr.width + (mouse.button==3 ? xdiff : 0)),
-                    MAX(50, hover_attr.height + (mouse.button==3 ? ydiff : 0)));
-            }
-        }
+        if (events[ev.type])
+            events[ev.type](&ev);
     }
 
     for (int i = 0; i < NUM_WS; ++i) {

@@ -15,7 +15,6 @@
 typedef struct arg_t {
     const char** com;
     const int i;
-    // const Window w;
 } arg_t;
 
 struct key_t {
@@ -50,6 +49,7 @@ void exec(const arg_t arg);
 void tile_mode(const arg_t arg);
 void ws_change(const arg_t arg);
 void win_to_ws(const arg_t arg);
+void win_master(const arg_t arg);
 void win_center(const arg_t arg);
 void win_prev(const arg_t arg);
 void win_next(const arg_t arg);
@@ -67,8 +67,14 @@ void win_get_size();
 void win_add(Window w);
 void win_del(Window w);
 
-void grab_input(Window root);
-void grab_key(Window root, uint32_t mod, KeySym key);
+void button_press(XEvent *ev);
+void button_release(XEvent *ev);
+void configure_request(XEvent *ev);
 void key_press(XEvent *ev);
+void map_request(XEvent *ev);
+void destroy_notify(XEvent *ev);
+void unmap_notify(XEvent *ev);
+void motion_notify(XEvent *ev);
+void grab_input(Window root);
 
 #endif

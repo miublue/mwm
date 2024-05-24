@@ -9,9 +9,8 @@
 #define GAPSIZE 6
 #define DEFAULT_MODE MODE_TILE
 #define NUM_WS 10
-const bool focus_follows_pointer = false;
 
-const char *term[] = { "mterm",    NULL };
+const char *term[] = { "mterm",     NULL };
 const char *menu[] = { "dmenu_run", NULL };
 
 #define DESKTOPCHANGE(key, ws) \
@@ -22,12 +21,15 @@ static struct key_t keys[] = {
     {MOD,           XK_q,       win_kill,        {0}},
     {MOD,           XK_f,       win_fullscreen,  {0}},
     {MOD,           XK_c,       win_center,      {0}},
+    {MOD,           XK_space,   win_master,      {0}},
 
     {MOD,           XK_Tab,     win_next,        {0}},
     {MOD|ShiftMask, XK_Tab,     win_prev,        {0}},
 
-    {MOD,           XK_o,       win_rotate_prev, {0}},
-    {MOD,           XK_p,       win_rotate_next, {0}},
+    {MOD,           XK_k,       win_next,        {0}},
+    {MOD,           XK_j,       win_prev,        {0}},
+    {MOD|ShiftMask, XK_k,       win_rotate_next, {0}},
+    {MOD|ShiftMask, XK_j,       win_rotate_prev, {0}},
 
     {MOD|ShiftMask, XK_t,       tile_mode,       {.i = MODE_TILE}},
     {MOD|ShiftMask, XK_m,       tile_mode,       {.i = MODE_MONOCLE}},
