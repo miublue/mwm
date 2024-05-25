@@ -375,7 +375,7 @@ map_request(XEvent *ev)
 void
 unmap_notify(XEvent *ev)
 {
-    win_del(ev->xdestroywindow.window);
+    win_del(ev->xunmap.window);
     if (CUR_WS.list.size) {
         win_focus(CUR_WS.cur);
         win_tile();
