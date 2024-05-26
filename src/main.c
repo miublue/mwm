@@ -129,7 +129,9 @@ win_tile()
         return;
     }
 
-    int master_sz = screen_w / 2;
+    int master_sz = CUR_WS.master_sz;
+    int stack_sz = screen_w - master_sz;
+
     wn = WS_WIN(0).window;
     XMoveResizeWindow(display, wn,
             GAPSIZE,
@@ -146,7 +148,7 @@ win_tile()
         XMoveResizeWindow(display, wn,
                 master_sz + GAPSIZE,
                 (i-1)*h + TOPGAP + GAPSIZE,
-                master_sz - (GAPSIZE*2),
+                stack_sz - (GAPSIZE*2),
                 h - GAPSIZE);
     }
 }
@@ -270,6 +272,14 @@ win_master(const arg_t arg)
 }
 
 void
+resize_master(const arg_t arg)
+{
+    if (!CUR_WS.list.size) return;
+    CUR_WS.master_sz += arg.i;
+    win_tile();
+}
+
+void
 win_fullscreen(const arg_t arg)
 {
     (void) arg;
@@ -372,10 +382,11 @@ map_request(XEvent *ev)
     win_tile();
 }
 
-void
-unmap_notify(XEvent *ev)
+static void
+win_unmap_destroy_idk(Window wn)
 {
-    win_del(ev->xunmap.window);
+    win_del(wn);
+    XSetInputFocus(display, root, RevertToParent, CurrentTime);
     if (CUR_WS.list.size) {
         win_focus(CUR_WS.cur);
         win_tile();
@@ -383,13 +394,15 @@ unmap_notify(XEvent *ev)
 }
 
 void
+unmap_notify(XEvent *ev)
+{
+    win_unmap_destroy_idk(ev->xunmap.window);
+}
+
+void
 destroy_notify(XEvent *ev)
 {
-    win_del(ev->xdestroywindow.window);
-    if (CUR_WS.list.size) {
-        win_focus(CUR_WS.cur);
-        win_tile();
-    }
+    win_unmap_destroy_idk(ev->xdestroywindow.window);
 }
 
 void
@@ -486,6 +499,7 @@ main(int argc, char **argv)
         desktops[i].list = (list_client_t) LIST_ALLOC(client_t);
         desktops[i].mode = DEFAULT_MODE;
         desktops[i].cur = 0;
+        desktops[i].master_sz = screen_w * MASTER_SIZE;
     }
 
     XDefineCursor(display, root, XCreateFontCursor(display, 68));

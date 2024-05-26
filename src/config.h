@@ -9,6 +9,7 @@
 #define GAPSIZE 6
 #define DEFAULT_MODE MODE_TILE
 #define NUM_WS 10
+#define MASTER_SIZE 0.5
 
 const char *term[] = { "mterm",     NULL };
 const char *menu[] = { "dmenu_run", NULL };
@@ -30,6 +31,9 @@ static struct key_t keys[] = {
     {MOD,           XK_j,       win_prev,        {0}},
     {MOD|ShiftMask, XK_k,       win_rotate_next, {0}},
     {MOD|ShiftMask, XK_j,       win_rotate_prev, {0}},
+
+    {MOD,           XK_h,       resize_master,   {.i = -10}},
+    {MOD,           XK_l,       resize_master,   {.i =  10}},
 
     {MOD|ShiftMask, XK_t,       tile_mode,       {.i = MODE_TILE}},
     {MOD|ShiftMask, XK_m,       tile_mode,       {.i = MODE_MONOCLE}},

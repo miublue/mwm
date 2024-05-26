@@ -43,6 +43,7 @@ typedef struct desktop_t {
     list_client_t list;
     int cur;
     int mode;
+    int master_sz;
 } desktop_t;
 
 void exec(const arg_t arg);
@@ -57,6 +58,7 @@ void win_kill(const arg_t arg);
 void win_fullscreen(const arg_t arg);
 void win_rotate_next(const arg_t arg);
 void win_rotate_prev(const arg_t arg);
+void resize_master(const arg_t arg);
 void win_swap(int a, int b);
 void win_move(int wn, int x, int y);
 void win_resize(int wn, int w, int h);
