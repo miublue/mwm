@@ -1,7 +1,7 @@
-#include <X11/Xlib.h>
 #include <X11/XF86keysym.h>
 #include <X11/keysym.h>
 #include <X11/XKBlib.h>
+#include <X11/Xutil.h>
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -10,6 +10,8 @@
 #include "mlist.h"
 #include "mwm.h"
 #include "config.h"
+
+// TODO: maybe keep fullscreen window when changing modes
 
 Display *display;
 Window root;
@@ -35,12 +37,17 @@ static void (*events[LASTEvent])(XEvent*) = {
 #define WS_WIN(c) CUR_WS.list.data[(c)]
 #define CUR_WIN WS_WIN(CUR_WS.cur)
 
+static void win_tile_master_stack();
+static void win_tile_monocle();
+static void win_draw_floating();
+
 void
 tile_mode(const arg_t arg)
 {
     CUR_WS.mode = arg.i;
     if (CUR_WS.mode == MODE_FLOAT) {
         for (int i = 0; i < CUR_WS.list.size; ++i) {
+            WS_WIN(i).fullscreen = false;
             XMoveResizeWindow(display, WS_WIN(i).window,
                 WS_WIN(i).x, WS_WIN(i).y, WS_WIN(i).w, WS_WIN(i).h);
         }
@@ -104,80 +111,114 @@ void
 win_tile()
 {
     if (CUR_WS.list.size == 0 || CUR_WS.mode == MODE_FLOAT) return;
-    Window wn;
 
-    if (CUR_WS.mode == MODE_MONOCLE) {
-        for (int i = 0; i < CUR_WS.list.size; ++i) {
-            wn = WS_WIN(i).window;
-            WS_WIN(i).fullscreen = false;
-            XMoveResizeWindow(display, wn,
-                    GAPSIZE,
-                    TOPGAP + GAPSIZE,
-                    screen_w - GAPSIZE*2,
-                    screen_h - TOPGAP - GAPSIZE*2);
+    switch (CUR_WS.mode) {
+    case MODE_MONOCLE:
+        win_tile_monocle();
+        break;
+    default:
+        win_tile_master_stack();
+        break;
+    }
+}
+
+static void
+win_tile_master_stack()
+{
+    Window wn;
+    int master_sz = CUR_WS.master_sz;
+    int stack_sz = screen_w - master_sz;
+    int master = -1;
+    int nstack = 0;
+
+    for (int i = 0; i < CUR_WS.list.size; ++i) {
+        WS_WIN(i).fullscreen = false;
+        if (!WS_WIN(i).floating) {
+            if (master < 0)
+                master = i;
+            else
+                nstack++;
         }
+    }
+
+    // bruh this feels hacky as fuck
+
+    if (master < 0) {
+        win_draw_floating();
         return;
     }
 
-    if (CUR_WS.list.size == 1) {
-        wn = CUR_WIN.window;
+    if ((CUR_WS.list.size == 1 && !CUR_WIN.floating) || nstack == 0) {
+        wn = WS_WIN(master).window;
         XMoveResizeWindow(display, wn,
                 GAPSIZE,
                 TOPGAP + GAPSIZE,
                 screen_w - GAPSIZE*2,
                 screen_h - TOPGAP - GAPSIZE*2);
+
+        win_draw_floating();
         return;
     }
 
-    int master_sz = CUR_WS.master_sz;
-    int stack_sz = screen_w - master_sz;
-
-    wn = WS_WIN(0).window;
+    wn = WS_WIN(master).window;
     XMoveResizeWindow(display, wn,
-            GAPSIZE,
-            TOPGAP + GAPSIZE,
-            master_sz - GAPSIZE,
-            screen_h - TOPGAP - (GAPSIZE*2));
+           GAPSIZE,
+           TOPGAP + GAPSIZE,
+           master_sz - GAPSIZE,
+           screen_h - TOPGAP - (GAPSIZE*2));
 
-    int h = (screen_h-TOPGAP-GAPSIZE) / (CUR_WS.list.size-1);
+    int h = (screen_h-TOPGAP-GAPSIZE) / (nstack);
+    int w = 0;
 
-    for (int i = 1; i < CUR_WS.list.size; ++i) {
+    for (int i = master+1; i < CUR_WS.list.size; ++i) {
+        if (WS_WIN(i).floating) continue;
         wn = WS_WIN(i).window;
 
-        WS_WIN(i).fullscreen = false;
         XMoveResizeWindow(display, wn,
                 master_sz + GAPSIZE,
-                (i-1)*h + TOPGAP + GAPSIZE,
+                w*h + TOPGAP + GAPSIZE,
                 stack_sz - (GAPSIZE*2),
                 h - GAPSIZE);
+        ++w;
     }
+
+    win_draw_floating();
 }
 
-void
-win_move(int wn, int x, int y)
+static void
+win_tile_monocle()
 {
-    if (!CUR_WS.list.size || wn < 0 || wn >= CUR_WS.list.size) return;
-    if (CUR_WS.mode != MODE_FLOAT || WS_WIN(wn).fullscreen) return;
-    WS_WIN(wn).x += x;
-    WS_WIN(wn).y += y;
-    XMoveWindow(display, WS_WIN(wn).window, WS_WIN(wn).x, WS_WIN(wn).y);
+    Window wn;
+    for (int i = 0; i < CUR_WS.list.size; ++i) {
+        if (WS_WIN(i).floating) continue;
+        wn = WS_WIN(i).window;
+        WS_WIN(i).fullscreen = false;
+        XMoveResizeWindow(display, wn,
+                GAPSIZE,
+                TOPGAP + GAPSIZE,
+                screen_w - GAPSIZE*2,
+                screen_h - TOPGAP - GAPSIZE*2);
+    }
+
+    win_draw_floating();
 }
 
-void
-win_resize(int wn, int w, int h)
+static void
+win_draw_floating()
 {
-    if (!CUR_WS.list.size || wn < 0 || wn >= CUR_WS.list.size) return;
-    if (CUR_WS.mode != MODE_FLOAT || WS_WIN(wn).fullscreen) return;
-    WS_WIN(wn).w += w;
-    WS_WIN(wn).h += h;
-    XResizeWindow(display, WS_WIN(wn).window, WS_WIN(wn).w, WS_WIN(wn).h);
+    client_t c;
+    for (int i = 0; i < CUR_WS.list.size; ++i) {
+        if (!WS_WIN(i).floating) continue;
+        c = WS_WIN(i);
+        XMoveResizeWindow(display, c.window, c.x, c.y, c.w, c.h);
+    }
 }
 
 void
 win_prev(const arg_t arg)
 {
     (void) arg;
-    if (!CUR_WS.list.size) return;
+    if (!CUR_WS.list.size || CUR_WIN.fullscreen) return;
     if (CUR_WS.cur == 0) CUR_WS.cur = CUR_WS.list.size-1;
     else CUR_WS.cur--;
     XRaiseWindow(display, CUR_WIN.window);
@@ -188,7 +229,7 @@ void
 win_next(const arg_t arg)
 {
     (void) arg;
-    if (!CUR_WS.list.size) return;
+    if (!CUR_WS.list.size || CUR_WIN.fullscreen) return;
     if (CUR_WS.cur >= CUR_WS.list.size-1) CUR_WS.cur = 0;
     else CUR_WS.cur++;
     XRaiseWindow(display, CUR_WIN.window);
@@ -210,7 +251,7 @@ void
 win_rotate_next(const arg_t arg)
 {
     (void) arg;
-    if (CUR_WS.list.size < 2) return;
+    if (CUR_WS.list.size < 2 || CUR_WIN.fullscreen) return;
     if (CUR_WS.cur == CUR_WS.list.size-1) {
         win_swap(CUR_WS.cur, 0);
         return;
@@ -222,7 +263,7 @@ void
 win_rotate_prev(const arg_t arg)
 {
     (void) arg;
-    if (CUR_WS.list.size < 2) return;
+    if (CUR_WS.list.size < 2 || CUR_WIN.fullscreen) return;
     if (CUR_WS.cur == 0) {
         win_swap(CUR_WS.cur, CUR_WS.list.size-1);
         return;
@@ -253,7 +294,7 @@ win_center(const arg_t arg)
     CUR_WIN.x = (screen_w / 2) - (CUR_WIN.w / 2);
     CUR_WIN.y = (screen_h / 2) - (CUR_WIN.h / 2) + (TOPGAP / 2);
 
-    if (CUR_WS.mode != MODE_FLOAT) return;
+    if (CUR_WS.mode != MODE_FLOAT && !CUR_WIN.floating) return;
     CUR_WIN.fullscreen = false;
 
     XMoveResizeWindow(display, CUR_WIN.window,
@@ -276,6 +317,15 @@ resize_master(const arg_t arg)
 {
     if (!CUR_WS.list.size) return;
     CUR_WS.master_sz += arg.i;
+    win_tile();
+}
+
+void
+win_float(const arg_t arg)
+{
+    (void) arg;
+    if (!CUR_WS.list.size) return;
+    CUR_WIN.floating = !CUR_WIN.floating;
     win_tile();
 }
 
@@ -313,6 +363,7 @@ win_add(Window w)
     client_t c;
     c.window = w;
     c.fullscreen = false;
+    c.floating = (CUR_WS.mode == MODE_FLOAT);
 
     LIST_ADD(CUR_WS.list, 0, c);
     CUR_WS.cur = 0;
@@ -448,7 +499,7 @@ button_release(XEvent *ev)
 void
 motion_notify(XEvent *ev)
 {
-    if (mouse.subwindow == None || CUR_WS.mode != MODE_FLOAT)
+    if (mouse.subwindow == None || (!CUR_WIN.floating && CUR_WS.mode != MODE_FLOAT))
         return;
 
     int xdiff = ev->xbutton.x_root - mouse.x_root;

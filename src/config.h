@@ -22,15 +22,17 @@ static struct key_t keys[] = {
     {MOD,           XK_q,       win_kill,        {0}},
     {MOD,           XK_f,       win_fullscreen,  {0}},
     {MOD,           XK_c,       win_center,      {0}},
+
     {MOD,           XK_space,   win_master,      {0}},
+    {MOD|ShiftMask, XK_space,   win_float,       {0}},
 
     {MOD,           XK_Tab,     win_next,        {0}},
     {MOD|ShiftMask, XK_Tab,     win_prev,        {0}},
 
-    {MOD,           XK_k,       win_next,        {0}},
-    {MOD,           XK_j,       win_prev,        {0}},
-    {MOD|ShiftMask, XK_k,       win_rotate_next, {0}},
-    {MOD|ShiftMask, XK_j,       win_rotate_prev, {0}},
+    {MOD,           XK_j,       win_next,        {0}},
+    {MOD,           XK_k,       win_prev,        {0}},
+    {MOD|ShiftMask, XK_j,       win_rotate_next, {0}},
+    {MOD|ShiftMask, XK_k,       win_rotate_prev, {0}},
 
     {MOD,           XK_h,       resize_master,   {.i = -10}},
     {MOD,           XK_l,       resize_master,   {.i =  10}},

@@ -27,6 +27,7 @@ struct key_t {
 typedef struct client_t {
     uint32_t x, y, w, h;
     bool fullscreen;
+    bool floating;
     Window window;
 } client_t;
 
@@ -56,13 +57,12 @@ void win_prev(const arg_t arg);
 void win_next(const arg_t arg);
 void win_kill(const arg_t arg);
 void win_fullscreen(const arg_t arg);
+void win_float(const arg_t arg);
 void win_rotate_next(const arg_t arg);
 void win_rotate_prev(const arg_t arg);
 void resize_master(const arg_t arg);
-void win_swap(int a, int b);
-void win_move(int wn, int x, int y);
-void win_resize(int wn, int w, int h);
 
+void win_swap(int a, int b);
 void win_focus(size_t c);
 void win_tile();
 void win_get_size();
