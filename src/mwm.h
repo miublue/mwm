@@ -34,8 +34,8 @@ typedef struct client_t {
 LIST_DEFINE(client_t, list_client_t);
 
 enum {
-    MODE_TILE,
     MODE_MONOCLE,
+    MODE_TILE,
     MODE_FLOAT,
     NUM_MODES,
 };

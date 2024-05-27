@@ -45,13 +45,13 @@ void
 tile_mode(const arg_t arg)
 {
     CUR_WS.mode = arg.i;
-    if (CUR_WS.mode == MODE_FLOAT) {
-        for (int i = 0; i < CUR_WS.list.size; ++i) {
-            WS_WIN(i).fullscreen = false;
-            XMoveResizeWindow(display, WS_WIN(i).window,
-                WS_WIN(i).x, WS_WIN(i).y, WS_WIN(i).w, WS_WIN(i).h);
-        }
-    }
+    // if (CUR_WS.mode == MODE_FLOAT) {
+        // for (int i = 0; i < CUR_WS.list.size; ++i) {
+            // WS_WIN(i).fullscreen = false;
+            // XMoveResizeWindow(display, WS_WIN(i).window,
+                // WS_WIN(i).x, WS_WIN(i).y, WS_WIN(i).w, WS_WIN(i).h);
+        // }
+    // }
     win_tile();
 }
 
@@ -110,7 +110,8 @@ win_get_size()
 void
 win_tile()
 {
-    if (CUR_WS.list.size == 0 || CUR_WS.mode == MODE_FLOAT) return;
+    if (CUR_WS.list.size == 0) return;
+    // if (CUR_WS.list.size == 0 || CUR_WS.mode == MODE_FLOAT) return;
 
     switch (CUR_WS.mode) {
     case MODE_MONOCLE:
