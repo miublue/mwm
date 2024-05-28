@@ -39,7 +39,8 @@ static struct key_t keys[] = {
 
     {MOD|ShiftMask, XK_t,       tile_mode,       {.i = MODE_TILE}},
     {MOD|ShiftMask, XK_m,       tile_mode,       {.i = MODE_MONOCLE}},
-    {MOD|ShiftMask, XK_f,       tile_mode,       {.i = MODE_FLOAT}},
+    {MOD|ShiftMask, XK_f,       float_mode,      {0}},
+    // {MOD|ShiftMask, XK_f,       tile_mode,       {.i = MODE_FLOAT}},
 
     {MOD,           XK_d,       exec,            {.com = menu}},
     {MOD,           XK_Return,  exec,            {.com = term}},

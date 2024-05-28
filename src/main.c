@@ -45,13 +45,15 @@ void
 tile_mode(const arg_t arg)
 {
     CUR_WS.mode = arg.i;
-    // if (CUR_WS.mode == MODE_FLOAT) {
-        // for (int i = 0; i < CUR_WS.list.size; ++i) {
-            // WS_WIN(i).fullscreen = false;
-            // XMoveResizeWindow(display, WS_WIN(i).window,
-                // WS_WIN(i).x, WS_WIN(i).y, WS_WIN(i).w, WS_WIN(i).h);
-        // }
-    // }
+    // CUR_WIN.fullscreen = false;
+    win_tile();
+}
+
+void
+float_mode(const arg_t arg)
+{
+    (void) arg;
+    CUR_WS.floating = !CUR_WS.floating;
     win_tile();
 }
 
@@ -111,7 +113,6 @@ void
 win_tile()
 {
     if (CUR_WS.list.size == 0) return;
-    // if (CUR_WS.list.size == 0 || CUR_WS.mode == MODE_FLOAT) return;
 
     switch (CUR_WS.mode) {
     case MODE_MONOCLE:
@@ -120,6 +121,10 @@ win_tile()
     default:
         win_tile_master_stack();
         break;
+    }
+
+    if (CUR_WIN.fullscreen) {
+        XMoveResizeWindow(display, CUR_WIN.window, 0, 0, screen_w, screen_h);
     }
 }
 
@@ -133,7 +138,6 @@ win_tile_master_stack()
     int nstack = 0;
 
     for (int i = 0; i < CUR_WS.list.size; ++i) {
-        WS_WIN(i).fullscreen = false;
         if (!WS_WIN(i).floating) {
             if (master < 0)
                 master = i;
@@ -193,7 +197,6 @@ win_tile_monocle()
     for (int i = 0; i < CUR_WS.list.size; ++i) {
         if (WS_WIN(i).floating) continue;
         wn = WS_WIN(i).window;
-        WS_WIN(i).fullscreen = false;
         XMoveResizeWindow(display, wn,
                 GAPSIZE,
                 TOPGAP + GAPSIZE,
@@ -283,8 +286,6 @@ win_focus(size_t l)
     CUR_WS.cur = l;
     XSetInputFocus(display, CUR_WIN.window, RevertToParent, CurrentTime);
     XRaiseWindow(display, CUR_WIN.window);
-    // if (CUR_WS.mode == MODE_FLOAT && !CUR_WIN.fullscreen)
-        // win_get_size();
 }
 
 void
@@ -295,7 +296,7 @@ win_center(const arg_t arg)
     CUR_WIN.x = (screen_w / 2) - (CUR_WIN.w / 2);
     CUR_WIN.y = (screen_h / 2) - (CUR_WIN.h / 2) + (TOPGAP / 2);
 
-    if (CUR_WS.mode != MODE_FLOAT && !CUR_WIN.floating) return;
+    if (!CUR_WIN.floating) return;
     CUR_WIN.fullscreen = false;
 
     XMoveResizeWindow(display, CUR_WIN.window,
@@ -361,10 +362,13 @@ win_kill(const arg_t arg)
 void
 win_add(Window w)
 {
+    if (CUR_WS.list.size)
+        CUR_WIN.fullscreen = false;
+
     client_t c;
     c.window = w;
     c.fullscreen = false;
-    c.floating = (CUR_WS.mode == MODE_FLOAT);
+    c.floating = (CUR_WS.floating);
 
     LIST_ADD(CUR_WS.list, 0, c);
     CUR_WS.cur = 0;
@@ -500,7 +504,7 @@ button_release(XEvent *ev)
 void
 motion_notify(XEvent *ev)
 {
-    if (mouse.subwindow == None || (!CUR_WIN.floating && CUR_WS.mode != MODE_FLOAT))
+    if (mouse.subwindow == None || !CUR_WIN.floating)
         return;
 
     int xdiff = ev->xbutton.x_root - mouse.x_root;
@@ -551,6 +555,7 @@ main(int argc, char **argv)
         desktops[i].list = (list_client_t) LIST_ALLOC(client_t);
         desktops[i].mode = DEFAULT_MODE;
         desktops[i].cur = 0;
+        desktops[i].floating = false;
         desktops[i].master_sz = screen_w * MASTER_SIZE;
     }
 
