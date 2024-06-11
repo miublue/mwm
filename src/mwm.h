@@ -36,7 +36,7 @@ LIST_DEFINE(client_t, list_client_t);
 enum {
     MODE_MONOCLE,
     MODE_TILE,
-    // MODE_FLOAT,
+    MODE_FLOAT,
     NUM_MODES,
 };
 
@@ -44,13 +44,12 @@ typedef struct desktop_t {
     list_client_t list;
     int cur;
     int mode;
+    int last_mode;
     int master_sz;
-    bool floating;
 } desktop_t;
 
 void exec(const arg_t arg);
 void tile_mode(const arg_t arg);
-void float_mode(const arg_t arg);
 void ws_change(const arg_t arg);
 void win_to_ws(const arg_t arg);
 void win_master(const arg_t arg);

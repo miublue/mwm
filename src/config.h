@@ -34,13 +34,12 @@ static struct key_t keys[] = {
     {MOD|ShiftMask, XK_j,       win_rotate_next, {0}},
     {MOD|ShiftMask, XK_k,       win_rotate_prev, {0}},
 
-    {MOD,           XK_h,       resize_master,   {.i = -10}},
-    {MOD,           XK_l,       resize_master,   {.i =  10}},
+    {MOD,           XK_h,       resize_master,   {.i = -20}},
+    {MOD,           XK_l,       resize_master,   {.i =  20}},
 
     {MOD|ShiftMask, XK_t,       tile_mode,       {.i = MODE_TILE}},
     {MOD|ShiftMask, XK_m,       tile_mode,       {.i = MODE_MONOCLE}},
-    {MOD|ShiftMask, XK_f,       float_mode,      {0}},
-    // {MOD|ShiftMask, XK_f,       tile_mode,       {.i = MODE_FLOAT}},
+    {MOD|ShiftMask, XK_f,       tile_mode,       {.i = MODE_FLOAT}},
 
     {MOD,           XK_d,       exec,            {.com = menu}},
     {MOD,           XK_Return,  exec,            {.com = term}},
